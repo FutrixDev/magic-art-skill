@@ -1,0 +1,94 @@
+# Mirror the skill files out of the published @magic-art/cli tarball.
+#
+# npm is the source of truth: the skill prose and the binary that implements it
+# ship together so they can never be at different versions. This repo is only a
+# distribution surface (Claude Code marketplace, skills.sh, ClawHub), so it
+# derives its content from what npm actually published rather than from anyone's
+# working tree. Nothing here should ever be hand-edited under skills/.
+name: sync-from-npm
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "@magic-art/cli version to mirror (dist-tag or exact version)"
+        required: false
+        default: latest
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Pull skill files from the published tarball
+        id: fetch
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.version || 'latest' }}"
+          VERSION="$(npm view "@magic-art/cli@${REF}" version)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          WORK="$(mktemp -d)"
+          ( cd "$WORK" && npm pack "@magic-art/cli@${VERSION}" --silent >/dev/null )
+          # A tarball with no skill/ directory means the packaging broke upstream;
+          # fail loudly rather than push an empty mirror.
+          tar -tzf "$WORK"/magic-art-cli-*.tgz | grep -q '^package/skill/SKILL.md$'
+          rm -rf skills/magic-art
+          mkdir -p skills/magic-art
+          tar -xzf "$WORK"/magic-art-cli-*.tgz -C skills/magic-art --strip-components=2 package/skill
+
+      - name: Pin the mirrored version
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const f = ".claude-plugin/plugin.json";
+            const j = JSON.parse(fs.readFileSync(f, "utf8"));
+            j.version = process.argv[1];
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n");
+          ' "${{ steps.fetch.outputs.version }}"
+
+      - name: Commit and tag
+        id: commit
+        run: |
+          set -euo pipefail
+          V="${{ steps.fetch.outputs.version }}"
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "already mirroring @magic-art/cli@${V}; nothing to do"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: mirror @magic-art/cli@${V} skill files"
+          git push
+          if ! git ls-remote --exit-code --tags origin "refs/tags/v${V}" >/dev/null 2>&1; then
+            git tag "v${V}"
+            git push origin "v${V}"
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to ClawHub
+        if: steps.commit.outputs.changed == 'true' && env.CLAWHUB_TOKEN != ''
+        run: |
+          set -euo pipefail
+          V="${{ steps.fetch.outputs.version }}"
+          npm i -g clawhub
+          clawhub login --token "$CLAWHUB_TOKEN"
+          clawhub skill publish ./skills/magic-art \
+            --slug magic-art \
+            --name "Magic Art" \
+            --version "${V}" \
+            --changelog "@magic-art/cli@${V}"

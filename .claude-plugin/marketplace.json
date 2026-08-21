@@ -1,0 +1,26 @@
+{
+  "name": "magic-art",
+  "description": "The Magic Art agent skill — create posters, social card decks, portraits and image series through the `magic` CLI.",
+  "owner": {
+    "name": "Futrix",
+    "url": "https://github.com/FutrixDev"
+  },
+  "plugins": [
+    {
+      "name": "magic-art",
+      "source": "./",
+      "displayName": "Magic Art",
+      "description": "Turn an idea into finished visuals with Magic Art (magic-design.art) — AI posters, social card decks, portraits and image series — then download them locally. Drives the `magic` CLI.",
+      "homepage": "https://magic-design.art/connect",
+      "repository": "https://github.com/FutrixDev/magic-art-skill",
+      "license": "MIT-0",
+      "author": {
+        "name": "Futrix",
+        "url": "https://magic-design.art"
+      },
+      "category": "design",
+      "keywords": ["magic-art", "image-generation", "poster", "design", "cli"],
+      "tags": ["image-generation", "poster", "social-card", "portrait", "design"]
+    }
+  ]
+}
