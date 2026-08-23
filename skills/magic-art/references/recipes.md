@@ -1,193 +1,213 @@
-# 配方（端到端命令序列）
+# Recipes (end-to-end command sequences)
 
-每个配方都可以照抄。`$ID` 是 `project create` 打印在 stdout 的作品 id。
-所有命令都带 `--json` 时，stdout 是可解析的；人类说明一律在 stderr。
+Every recipe here can be copied as-is. `$ID` is the work id `project create` prints on stdout.
+With `--json` on every command, stdout is parseable; human-facing notes always go to stderr.
 
 ---
 
-## 1. 单张海报（最短路径）
+## 1. A single poster (shortest path)
 
-用户：「帮我做一张咖啡店开业海报，主色调米白，周六上午十点开门。」
+User: "Make me a poster for a coffee shop opening — off-white palette, doors open Saturday at 10am."
 
 ```bash
-magic billing quote --op image -n 1 --json          # 退出码 21 → 停下来问人
+magic billing quote --op image -n 1 --json          # exit code 21 → stop and ask
 ID=$(magic project create --mode poster \
-      --text "咖啡店开业海报，主色米白，周六上午十点开门，写「新店开业」" )
-magic generate "$ID" --count 1 --wait --json         # JSONL 事件流，结束打印产物
+      --text "Coffee shop opening poster, off-white palette, opens Saturday 10am, reads 'Now Open'")
+magic generate "$ID" --count 1 --wait --json         # JSONL event stream, prints the results at the end
 magic assets download "$ID" --out ./out
 ```
 
-期望：`generate --wait --json` 最后一行是 `{"event":"done","jobId":…,"assets":[{"id":…,"url":…}]}`，
-退出码 0；`assets download` 打印本地文件路径。
+Expected: the last line of `generate --wait --json` is
+`{"event":"done","jobId":…,"assets":[{"id":…,"url":…}]}` with exit code 0; `assets download`
+prints local file paths.
 
-海报模式不需要 clarify，可以直接生成。用户想先看看风格选项时：
+Poster mode needs no clarify and can generate directly. When the user wants to see style
+options first:
 
 ```bash
 magic styles list --kind poster --json
-magic generate "$ID" --template <风格 id> --count 3 --wait --json
+magic generate "$ID" --template <style id> --count 3 --wait --json
 ```
 
 ---
 
-## 2. 小红书多页笔记（走 clarify）
+## 2. A Xiaohongshu multi-page note (goes through clarify)
 
-用户：「写个小红书，推荐我家楼下这家面包店，6 页。」
+User: "Write me a Xiaohongshu post about the bakery downstairs, 6 pages."
 
 ```bash
 magic billing quote --op image -n 6 --json
-ID=$(magic project create --mode social-card --text "推荐楼下的面包店，6 页笔记，真实探店口吻")
-magic clarify open "$ID" --json                      # 读 reply 里的问题
-magic clarify send "$ID" -m "受众是附近上班族；重点是可颂和酸种；有实拍图" --json
-magic clarify select "$ID" --template <推荐里选一个> --pages 6 --json
-magic clarify status "$ID" --json                    # ready_for_plan: true 才继续
+ID=$(magic project create --mode social-card --text "Recommend the bakery downstairs, 6-page note, genuine first-visit voice")
+magic clarify open "$ID" --json                      # read the question in `reply`
+magic clarify send "$ID" -m "Audience is office workers nearby; focus on the croissants and sourdough; I have real photos" --json
+magic clarify select "$ID" --template <pick one from the recommendations> --pages 6 --json
+magic clarify status "$ID" --json                    # continue only once ready_for_plan: true
 magic generate "$ID" --wait --json
 magic assets download "$ID" --out ./out
 ```
 
-要点：
-- `clarify open` 的 `recommended_templates[].reason` 就是选模板的依据，能选就代选。
-- `clarify select` 不跑模型，是把「选了哪几个模板 / 多少页」定下来的快通道。
-- 页数是 3–10，越界会被夹住。
+Key points:
+- `recommended_templates[].reason` from `clarify open` is the basis for picking a template —
+  choose for the user whenever you can.
+- `clarify select` runs no model; it is the fast path for fixing which templates and how many
+  pages.
+- Pages are 3–10; out-of-range values get clamped.
 
 ---
 
-## 3. 用参考图做系列图
+## 3. An image series from a reference photo
 
-用户：「这是我们的产品照，给我一组 4 张不同场景的图。」
+User: "Here's our product shot — give me a set of 4 images in different settings."
 
 ```bash
 magic billing quote --op image -n 4 --json
 ID=$(magic project create --mode image-series \
-      --text "同一款保温杯的 4 个使用场景：办公桌、露营、健身房、通勤" \
-      --ref ./cup.jpg --ref-prompt "这是产品实拍，必须保留产品本身外观，不要重新设计")
+      --text "One insulated bottle in 4 use settings: desk, camping, gym, commute" \
+      --ref ./cup.jpg --ref-prompt "This is a real product shot; the product's appearance must be preserved, not redesigned")
 magic clarify open "$ID" --json
-magic clarify send "$ID" -m "场景如上，风格干净自然光，不要浓重滤镜" --json
+magic clarify send "$ID" -m "Settings as above, clean natural light, no heavy filters" --json
 magic generate "$ID" --count 4 --wait --json
 magic assets download "$ID" --out ./out
 ```
 
-要点：`--ref` 可以重复给多张；`--ref-prompt` 是告诉模型这些图**扮演什么角色**
-（风格参考？要保留的主体？），漏了它模型会当成随便的灵感图。
+Key point: `--ref` can be repeated for several images; `--ref-prompt` tells the model **what
+role** those images play (a style reference? a subject that must be preserved?). Leave it out
+and the model treats them as loose inspiration.
 
 ---
 
-## 4. 生成中被问了问题（`awaiting_human`）
+## 4. Being asked a question mid-generation (`awaiting_human`)
 
 ```bash
 magic generate "$ID" --count 4 --wait --json
-# → 最后一行 {"event":"awaiting_human","jobId":"job_x","question":{"text":"标题想用中文还是英文？"}}
-# → 退出码 30
+# → last line {"event":"awaiting_human","jobId":"job_x","question":{"text":"Should the headline be in English or Chinese?"}}
+# → exit code 30
 ```
 
-能代答就代答，然后自动继续等：
+Answer it yourself when you can, and it keeps waiting automatically:
 
 ```bash
-magic job answer "$ID" --job job_x -m "用中文，正文可以有少量英文点缀" --json
+magic job answer "$ID" --job job_x -m "English, with a little Chinese accent text in the body" --json
 ```
 
-答不了（纯主观偏好，上下文里没依据）就把问题原样转述给用户，拿到回答再 `job answer`。
+When you can't (a pure preference with nothing in context), relay the question verbatim and
+`job answer` once the user replies.
 
-注意 `awaiting_human` 会**中止整批等待**，但其余 slot 仍在服务端跑。答完之后
-`magic job wait "$ID" --json` 会把剩下的一起跟完。
+Note that `awaiting_human` **aborts the wait for the whole batch**, but the remaining slots
+keep running server-side. After answering, `magic job wait "$ID" --json` follows the rest to
+completion.
 
 ---
 
-## 5. 改图迭代
+## 5. Iterating on an image
 
-用户：「第二张不错，但把标题换成「限时 8 折」，颜色再暖一点。」
+User: "The second one is good, but change the headline to 'Flash sale - 20% off' and warm it up."
 
 ```bash
-magic assets list "$ID" --json                       # 拿 asset id
+magic assets list "$ID" --json                       # get the asset id
 magic edit "$ID" --parent <assetId> \
-      --prompt "标题改成「限时 8 折」，整体色温再暖一点，其他保持不变" --json
-magic assets download "$ID" --asset <新 assetId> --out ./out
+      --prompt "Change the headline to 'Flash sale - 20% off', warm the overall colour temperature, leave everything else as is" --json
+magic assets download "$ID" --asset <new assetId> --out ./out
 ```
 
-`edit` 是**同步**的：命令返回时新图已经生成好了（最长等 5 分钟），没有 job 要跟。
-它同样花点数，改之前也该 quote。
+`edit` is **synchronous**: by the time the command returns, the new image exists (it waits up
+to 5 minutes) and there is no job to follow. It costs points too, so quote before editing.
 
-### 5b. 只改画面里的某一块（局部标注）
+### 5b. Changing just one area (regional annotation)
 
-用户：「整体挺好，就右上角那行标题和左下角空着的地方要动一下。」
+User: "Overall it's fine — just that headline top-right and the empty space bottom-left."
 
-整图 prompt 会让模型顺手把别处也重画。把位置标出来：
+A whole-image prompt invites the model to repaint other things on its way past. Point at the
+positions instead:
 
 ```bash
-magic assets download "$ID" --asset <assetId> --out ./out   # 必须：先把图看了
-# 看清那行标题在右上、大约占宽 30% / 高 12%，左下角空白在 y≈0.75
+magic assets download "$ID" --asset <assetId> --out ./out   # required: look at the image first
+# Confirm the headline sits top-right at roughly 30% width / 12% height, and the empty space is at y≈0.75
 magic edit "$ID" --parent <assetId> \
-      --mark "0.62,0.08,0.3,0.12=这行标题换成「限时 8 折」" \
-      --mark "0.1,0.75=这里太空，加一个咖啡杯小图标" \
+      --mark "0.62,0.08,0.3,0.12=replace this headline with 'Flash sale - 20% off'" \
+      --mark "0.1,0.75=too empty here, add a small coffee cup icon" \
       --json
-magic assets download "$ID" --asset <新 assetId> --out ./out
+magic assets download "$ID" --asset <new assetId> --out ./out
 ```
 
-标注多的时候写文件，`--marks-file marks.json`：
+With many marks, put them in a file and pass `--marks-file marks.json`:
 
 ```json
 [
-  { "x": 0.62, "y": 0.08, "w": 0.3, "h": 0.12, "note": "标题换成「限时 8 折」" },
-  { "x": 0.1, "y": 0.75, "note": "加一个咖啡杯小图标" }
+  { "x": 0.62, "y": 0.08, "w": 0.3, "h": 0.12, "note": "replace the headline with 'Flash sale - 20% off'" },
+  { "x": 0.1, "y": 0.75, "note": "add a small coffee cup icon" }
 ]
 ```
 
-要点：
-- 坐标是 0–1 的比例，左上角是原点；`x,y,w,h` 框一块，只给 `x,y` 是点一个位置。
-  给像素值会报退出码 10，不会被当成比例悄悄改错地方。
-- **坐标必须来自你看过的图**。只有 asset id 时坐标是猜的，猜错就是花钱改错地方。
-- 一次最多 10 处、每处 ≤300 字；有 `--mark` 时 `--prompt` 可省，也可以两个一起给
-  （`--prompt` 是整体要求，`--mark` 是逐处要求）。
-- 幂等键含坐标：原样重跑复用上次的 `operation_id`，动一个数字就是一次新的扣费。
+Key points:
+- Coordinates are fractions of 0–1 with the origin top-left; `x,y,w,h` boxes an area, `x,y`
+  alone points at a spot. Pixel values raise exit code 10 rather than being silently
+  reinterpreted as fractions and applied to the wrong place.
+- **Coordinates must come from an image you have looked at.** With only an asset id they are
+  guesses, and a wrong guess is paying to change the wrong thing.
+- At most 10 marks, each note ≤300 characters. With `--mark` present, `--prompt` is optional;
+  you can also give both (`--prompt` is the overall requirement, `--mark` the per-area ones).
+- The idempotency key includes the coordinates: re-running the exact command reuses the
+  previous `operation_id`, while changing a single number is a new charge.
 
 ---
 
-### 5c. 让用户自己在图上框（`--mark-ui`）
+### 5c. Letting the user box it themselves (`--mark-ui`)
 
-用户：「这里、还有这里，不太对。」——位置说不清，或者你对自己框的位置没把握。
+User: "Here, and also here, aren't quite right." — the position is hard to pin down, or you
+aren't confident in the boxes you would draw.
 
-不要猜坐标然后花钱试。把图摆到用户面前让他自己框：
+Don't guess coordinates and pay to find out. Put the image in front of them:
 
 ```bash
 magic edit "$ID" --parent <assetId> \
-      --mark "0.62,0.08,0.3,0.12=这行标题好像要改" \
+      --mark "0.62,0.08,0.3,0.12=this headline probably needs to change" \
       --mark-ui --json
 ```
 
-发生了什么：
+What happens:
 
-1. CLI 在 127.0.0.1 上起一个临时页面并打开浏览器，图直接从 CDN / 签名地址加载。
-2. 你给的 `--mark` 已经画在图上了（没给也行，用户从零框）。用户拖框、写说明。
-3. 用户点「提交并生成」→ CLI 拿到最终的框 **和浏览器合成的 ①②③ 标记图**，
-   一起发给模型；这时才开始渲染、才扣点数。
-4. 用户点「取消」/ 关掉页面 / 15 分钟没动 → 退出码 10，**没生成、没扣费**。
+1. The CLI serves a temporary page on 127.0.0.1 and opens a browser; the image loads straight
+   from the CDN or a signed URL.
+2. The `--mark` boxes you gave are already drawn on it (they're optional — without them the
+   user boxes from scratch). The user drags boxes and writes notes.
+3. The user clicks "submit and generate" → the CLI takes the final boxes **and the
+   browser-composed ①②③ annotated image** and sends both to the model. Only now does
+   rendering start and points get spent.
+4. The user clicks cancel / closes the page / does nothing for 15 minutes → exit code 10,
+   **nothing generated, nothing charged**.
 
 ```
 $ magic edit prj_x --parent ast_9 --mark-ui --json
-等待你在页面上标注并提交⋯（关掉页面 = 取消）
+Waiting for you to annotate and submit in the page… (closing the page = cancel)
 {"asset":{"id":"ast_10","parent_id":"ast_9","url":"https://…"}}
 ```
 
-取消之后不要拿盲标坐标重跑一遍——回头问用户想改什么。
+After a cancel, don't re-run with blind coordinates — go back and ask what they want changed.
 
-服务器 / 无头环境：加 `--no-open`，CLI 只打印 URL；用户能访问这台机器的 127.0.0.1
-才可用，否则退回 5b 的 `--mark` 给坐标。
+Servers and headless environments: add `--no-open` and the CLI only prints the URL. That works
+only if the user can reach 127.0.0.1 on that machine; otherwise fall back to the `--mark`
+coordinates of 5b.
 
 ---
 
-## 6. 中断后恢复（agent 崩了 / 用户关了终端）
+## 6. Resuming after an interruption (agent crashed / user closed the terminal)
 
-**不要重新 `generate`**——那是再买一次。
+**Do not run `generate` again** — that is buying it a second time.
 
 ```bash
 magic job list "$ID" --json
 ```
 
-- 有 `active` → `magic job wait "$ID" --json`
-- 有 `awaiting_human` → 先 `magic job answer`
-- 只有 `failed` → `magic job resume "$ID" --json`
-- 都没有、`assets` 已经有货 → 直接 `magic assets download`
+- An `active` job → `magic job wait "$ID" --json`
+- An `awaiting_human` job → `magic job answer` first
+- Only `failed` jobs → `magic job resume "$ID" --json`
+- None of the above and `assets` already has results → just `magic assets download`
 
-`generate` 的幂等只覆盖「上一次没提交成功」：请求没拿到响应（超时、断网、退出码 50）时
-`operation_id` 还开着，原样重跑会复用它，不会重复扣费。**服务端一旦接下了这次提交，
-再跑一次 `generate` 就是一次新的购买**（和在网页上再点一次生成一样）——所以恢复只走上面的
-`job list` / `job wait`。改了参数（数量/模板/版式）当然更是新的购买，因为那本来就是不同的图。
+`generate`'s idempotency only covers "the last submission never landed": when a request got no
+response (timeout, dropped connection, exit code 50) the `operation_id` is still open, so
+re-running the identical command reuses it and does not double-charge. **Once the server has
+accepted the submission, running `generate` again is a new purchase** — the same as clicking
+generate a second time on the website. So recovery goes through `job list` / `job wait` above.
+Changed parameters (count, template, layout) are more obviously a new purchase, because they
+are genuinely different images.

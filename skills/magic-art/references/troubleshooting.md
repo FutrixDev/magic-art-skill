@@ -1,72 +1,79 @@
-# 排错手册
+# Troubleshooting
 
-## 退出码（稳定契约，按它分支）
+## Exit codes (a stable contract — branch on it)
 
-| code | 含义 | 你该做什么 |
+| code | meaning | what you do |
 |---|---|---|
-| 0 | 成功 | 继续 |
-| 10 | 参数/用法错误 | 读 stderr 的提示改参数；`magic <命令> --help` 查全 |
-| 20 | 未登录 / token 过期 | 让用户 `magic login`，转述 URL + 配对码，**不代填** |
-| 21 | 余额不足 / 需升级 | 把点数价格和充值 URL 给用户，**停止**，绝不代买 |
-| 30 | `awaiting_human` | 读 stdout 的问题；能代答 → `magic job answer`；否则问人 |
-| 40 | job 失败 | `magic job list --json` 看 error 与 params → `job resume` 或改参 |
-| 50 | 瞬时错误（网络/5xx/429，CLI 已重试） | 等一会儿重跑**同一条**命令 |
-| 70 | CLI 内部错误 | 不是契约码；把 stderr 原文报给用户 |
+| 0 | success | continue |
+| 10 | bad arguments / usage | read the hint on stderr and fix the flags; `magic <command> --help` for the full list |
+| 20 | not logged in / token expired | have the user run `magic login`, relay the URL + pairing code, **never fill it in for them** |
+| 21 | insufficient balance / upgrade required | give the user the point price and the top-up URL, **stop**, never buy on their behalf |
+| 30 | `awaiting_human` | read the question on stdout; answer it yourself → `magic job answer`; otherwise ask the user |
+| 40 | job failed | `magic job list --json` for the error and params → `job resume` or change the parameters |
+| 50 | transient error (network / 5xx / 429, already retried by the CLI) | wait a moment and re-run **the same** command |
+| 70 | internal CLI error | not a contract code; report the stderr text verbatim to the user |
 
-`--json` 模式下失败也是一个 JSON 对象：`{"error":{"code":21,"message":"…"}}`。
+Under `--json` a failure is also a JSON object: `{"error":{"code":21,"message":"…"}}`.
 
-## 退出码 20：登录过期
+## Exit code 20: the session expired
 
-session token 有效期约 7 天，服务器端也可能被用户在
-「个人资料 → 已连接设备」里手动断开。表现都一样：任何命令退出码 20。
+Session tokens last about 7 days, and the user can also revoke a device from
+"Profile → Connected devices". Both look the same: every command exits 20.
 
-处理：
+Handling:
 
 ```bash
-magic auth status --json      # 确认确实是登录问题
-magic login                   # 打印授权 URL + 配对码，用户在浏览器确认
+magic auth status --json      # confirm it really is an auth problem
+magic login                   # prints an authorization URL + pairing code for the browser
 ```
 
-把 URL 和配对码**原样**转述给用户。不要替用户打开登录页填写任何东西，
-不要向用户索要密码或验证码。
+Relay the URL and the pairing code **verbatim**. Do not open the login page and type anything
+on the user's behalf, and never ask the user for a password or a verification code.
 
-`auth status --json` 里的 `expires_at` / `expires_in_days` 是这台设备的会话还剩多久。
-快到期可以顺口提醒用户重新 `magic login`，但**不要**因此提前替他跑——授权必须由
-用户在浏览器里确认。
+`expires_at` / `expires_in_days` in `auth status --json` is how much of this device's session
+is left. It's fine to mention that it is nearly up so the user can `magic login` again — but
+**don't** pre-emptively run it for them; authorization has to be confirmed by the user in a
+browser.
 
-## 退出码 21：余额不足
+## Exit code 21: not enough points
 
-`magic billing quote --op image -n <N> --json` 返回：
+`magic billing quote --op image -n <N> --json` returns:
 
 ```json
 {"points":40,"balancePoints":12,"canAfford":false,"requiredPlanId":null}
 ```
 
-告诉用户：这次要 40 点，账上 12 点，差 28 点，充值在 `https://magic-design.art/pricing`。
-然后**停下来**。可以提议减少张数并重新 quote——那是用户能马上决定的事。
+Tell the user: this run costs 40 points, the account has 12, so it's 28 short, and top-ups are
+at `https://magic-design.art/pricing`. Then **stop**. Offering to reduce the count and quote
+again is fine — that's something the user can decide immediately.
 
-每个账号有一张免费图额度；单张生成会自动用掉它（批量生成不会）。
+Each account has one free image; single-image generation spends it automatically (batches
+don't).
 
-## 退出码 50 与限流
+## Exit code 50 and rate limits
 
-CLI 已经做了指数退避重试（上限 4 次，尊重 `Retry-After`）。看到 50 说明重试完还是失败。
+The CLI already retries with exponential backoff (4 attempts max, honouring `Retry-After`).
+A 50 means it still failed after those retries.
 
-- **等一会儿再重跑同一条命令**。`generate` 是幂等的，重跑不会重复扣费。
-- 不要缩短间隔连打，不要并发多开 `magic` 进程刷同一个作品——那只会把限流打得更死。
-- 设备登录轮询里的 `slow_down` 由 CLI 自己处理，你不需要管。
+- **Wait a bit and re-run the same command.** `generate` is idempotent; re-running it does not
+  double-charge.
+- Don't hammer with a shorter interval, and don't run several `magic` processes against the
+  same work in parallel — that only makes the rate limiting worse.
+- The `slow_down` signal in device-login polling is handled by the CLI; you don't have to.
 
-## 绝对不要自己写轮询
+## Never hand-roll a polling loop
 
 ```
-# 反面教材，不要这样做
+# what NOT to do
 while true; do magic job list "$ID" --json; sleep 2; done
 ```
 
-用 `magic job wait <id> --json`。它按站点的节奏轮询（2.5s 起、线性升到 5s、总时限 15 分钟、
-容忍连续 4 次瞬时失败），并把状态变化输出成 JSONL 事件：
+Use `magic job wait <id> --json`. It polls at the site's cadence (starts at 2.5s, ramps
+linearly to 5s, 15-minute overall limit, tolerates 4 consecutive transient failures) and
+emits state changes as JSONL events:
 
 ```jsonl
-{"event":"phase","jobId":"…","phase":"running","label":"生成中"}
+{"event":"phase","jobId":"…","phase":"running","label":"Generating"}
 {"event":"progress","jobId":"…","donePages":1,"totalPages":4}
 {"event":"preview","jobId":"…","text":"…"}
 {"event":"retry","jobId":"…","attempt":1,"total":3}
@@ -76,107 +83,124 @@ while true; do magic job list "$ID" --json; sleep 2; done
 {"event":"timeout","pending":["…"]}
 ```
 
-`timeout` 事件退出码 50，但**任务仍在服务端跑**——再 `job wait` 一次即可，不要重新 generate。
+A `timeout` event exits 50, but **the job is still running server-side** — just `job wait`
+again; do not re-run `generate`.
 
-## `awaiting_human` 代答模板
+## Answering `awaiting_human` yourself
 
-`{"event":"awaiting_human","question":{"text":"…"}}` 之后退出码 30。常见问题类型：
+`{"event":"awaiting_human","question":{"text":"…"}}` comes with exit code 30. Common question
+types:
 
-| 问题类型 | 能不能代答 | 怎么答 |
+| question type | can you answer it? | how |
 |---|---|---|
-| 文案细节（标题写什么、要不要加电话） | **能**，如果用户提过 | 从对话上下文原样回填；没提过就问人 |
-| 语言（中文/英文/中英混排） | **能** | 跟用户输入的语言一致 |
-| 事实信息（时间、地址、价格、联系方式） | **只能**用户给过的 | 上下文里没有就问人，**不要编** |
-| 构图取舍（横版还是竖版、留白多少） | 一般能 | 按用途推断：海报竖版、社媒方图、封面横版 |
-| 审美偏好（喜欢哪种色调、要不要更活泼） | **看情况** | 用户表达过倾向就照办；纯偏好且无依据 → 问人 |
-| 人物/产品的身份细节 | **不能** | 一律问人；猜错等于生成了错的东西 |
+| copy details (what the headline says, whether to include a phone number) | **yes**, if the user mentioned it | fill it back in from the conversation; if they never said, ask |
+| language (English / Chinese / mixed) | **yes** | match the language the user is writing in |
+| facts (dates, addresses, prices, contact details) | **only** what the user gave you | not in context → ask; **never invent** |
+| composition trade-offs (portrait or landscape, how much white space) | usually yes | infer from the use: posters portrait, social square, covers landscape |
+| aesthetic preference (which palette, should it be livelier) | **it depends** | follow any leaning the user expressed; pure preference with nothing to go on → ask |
+| identity details of a person or product | **no** | always ask; guessing wrong means generating the wrong thing |
 
-代答后：
+After deciding:
 
 ```bash
-magic job answer "$ID" --job <jobId> -m "<回答>" --json
+magic job answer "$ID" --job <jobId> -m "<answer>" --json
 ```
 
-默认会自动继续等到结束；只想提交不想等就加 `--no-wait`。
+By default it keeps waiting until the job finishes; add `--no-wait` to submit without waiting.
 
-## `job resume` 决策树
+## `job resume` decision tree
 
-先看清楚状态：
+Get a clear picture of the state first:
 
 ```bash
 magic job list "$ID" --json
 ```
 
 ```
-有 active job?
-├─ 是 → magic job wait          （别 resume，也别重新 generate）
-└─ 否
-   ├─ awaiting_human? → magic job answer（答完自动续等）
-   └─ 有 failed job?
-      ├─ error 是瞬时的（超时 / 上游不可用 / 网络）→ magic job resume
-      ├─ error 是内容被拒（涉及敏感内容、参考图不合规）
-      │   → 不要 resume。改 prompt / 换参考图，问清楚用户后重新 generate
-      ├─ error 是参数问题（模板不存在、版式非法）
-      │   → 修参数后重新 generate（这是新的一次购买）
-      └─ 看不懂 → 把 error 原文转述给用户，让用户决定
+Any active job?
+├─ yes → magic job wait          (don't resume, and don't re-run generate)
+└─ no
+   ├─ awaiting_human? → magic job answer (keeps waiting once answered)
+   └─ Any failed job?
+      ├─ the error is transient (timeout / upstream unavailable / network) → magic job resume
+      ├─ the error is a content rejection (sensitive content, non-compliant reference image)
+      │   → do not resume. Change the prompt / reference image, check with the user, generate again
+      ├─ the error is a parameter problem (template doesn't exist, illegal layout)
+      │   → fix the parameters and generate again (this is a new purchase)
+      └─ you can't tell → relay the error text to the user and let them decide
 ```
 
-`job resume` 会用失败任务记录下来的原参数重放，并**重新计费**——失败的那次已经退款了，
-所以重放是一次诚实的新扣费，不是重复扣费。
+`job resume` replays the failed job with the parameters it recorded, and **charges again** —
+the failed run was already refunded, so the replay is an honest new charge, not a double
+charge.
 
-## 图片拿不到 / 下载失败
+## Images won't download
 
-- `assets download` 直接连 CDN 或私有桶的签名地址。403 通常是签名过期：
-  重跑一次 `assets download`（会重新拿地址）即可。
-- 报「没有直连地址」= 这个环境没配公共 CDN 也没配私有桶签名，是环境问题，
-  **不要试图从 API 抓字节绕过**。把这个信息报给用户。
+- `assets download` connects straight to the CDN or a signed private-bucket URL. A 403 is
+  usually an expired signature: re-run `assets download` (it fetches a fresh URL).
+- "no direct URL available" = this environment has neither a public CDN nor private-bucket
+  signing configured. That is an environment problem; **do not try to pull the bytes through
+  the API instead.** Report it to the user.
 
-## `--mark` 被拒（退出码 10）
+## `--mark` rejected (exit code 10)
 
-局部标注的坐标是 **0–1 的比例**，不是像素。`--mark "1200,800,300,200=改这里"` 会被
-直接拒绝，而不是被截断成边角——这是故意的：一个悄悄改错位置的编辑比一次报错贵得多。
+Annotation coordinates are **fractions of 0–1**, not pixels. `--mark "1200,800,300,200=change
+this"` is rejected outright rather than clamped into a corner — deliberately: an edit that
+quietly lands in the wrong place costs far more than an error message.
 
-- 拿到像素坐标就自己除一下：`x/图宽`、`y/图高`、`w/图宽`、`h/图高`。
-- 字段缺一不可：`x,y,w,h=说明` 或 `x,y=说明`，`=` 后面必须有说明文字。
-  空字段（`0.2,,0.3,0.1=…`）会报错，不会被当成 0。
-- `=` 只按**第一个**分割，说明里可以照常写等号。
-- `--marks-file` 里 `note` 不能是空字符串——没说明的框等于花钱让模型猜，会直接报错。
-- 超过 10 处、或某处说明超过 300 字会被拒——和网页端同一套上限，不是 CLI 自己加的。
-- 报「坐标像是像素」时，先确认你真的看过那张图：`magic assets download` 落地后再标。
+- Given pixel coordinates, divide them yourself: `x/imageWidth`, `y/imageHeight`,
+  `w/imageWidth`, `h/imageHeight`.
+- Every field is required: `x,y,w,h=note` or `x,y=note`, and there must be note text after the
+  `=`. An empty field (`0.2,,0.3,0.1=…`) is an error, not a 0.
+- The split happens at the **first** `=` only, so notes can contain equals signs.
+- `note` in `--marks-file` cannot be an empty string — an unexplained box is paying the model
+  to guess, so it errors out.
+- More than 10 marks, or a note over 300 characters, is rejected — the same limits as the web
+  app, not something the CLI adds.
+- If it says the coordinates look like pixels, first check that you actually looked at the
+  image: `magic assets download` it, then annotate.
 
-## `--mark-ui` 退出码 10：「已取消标注」
+## `--mark-ui` exit code 10: "annotation cancelled"
 
-用户点了取消、关掉了页面，或者 15 分钟没提交。**没有生成、没有扣点数**，这不是错误，
-是用户改主意了——回头问他想怎么改，不要换成盲标坐标再跑一次。
+The user hit cancel, closed the page, or didn't submit within 15 minutes. **Nothing was
+generated and nothing was charged.** This isn't an error, it's the user changing their mind —
+go back and ask what they want changed instead of falling back to blind coordinates.
 
-其他 `--mark-ui` 情况：
+Other `--mark-ui` situations:
 
-- **浏览器没自动打开**：CLI 已经把 URL 打印在 stderr 上了，转述给用户。服务器 /
-  容器里跑就直接加 `--no-open`。
-- **用户打不开这台机器的 127.0.0.1**（远程会话、容器）：`--mark-ui` 用不了，
-  退回 `--mark` 给坐标，并且必须先 `magic assets download` 看过图。
-- **「当前环境没有图片直连地址」**：这个环境没配 CDN / 签名地址，页面拿不到图。
-  用 `--mark` 给坐标。
-- **提交后页面提示不合法**：页面守的是和 `--mark` 同一套上限（≤10 处、说明 ≤300 字），
-  页面不会关，用户删掉多余的框再提交即可。
-- 页面合成的标记图只是给模型看的示意，**不进幂等键**；幂等键只认坐标和说明文字。
+- **The browser didn't open**: the CLI already printed the URL on stderr — relay it. On a
+  server or in a container, just pass `--no-open`.
+- **The user can't reach 127.0.0.1 on this machine** (remote session, container): `--mark-ui`
+  is unusable; fall back to `--mark` coordinates, and you must `magic assets download` and
+  look at the image first.
+- **"no direct image URL in this environment"**: no CDN / signed URL is configured here, so
+  the page can't load the image. Use `--mark` coordinates.
+- **The page rejects a submission**: it enforces the same limits as `--mark` (≤10 marks, notes
+  ≤300 chars). The page stays open; the user removes the extra boxes and submits again.
+- The annotated image the page composes is only a visual aid for the model and **is not part
+  of the idempotency key** — only coordinates and note text are.
 
-## 幂等与「我是不是重复扣费了」
+## Idempotency, and "did I just get charged twice?"
 
-- `generate` / `edit` / `job answer` / `job resume` 内部按「作品 + 意图指纹」维护
-  `operation_id`。**这个 id 只在「上一次没提交成功」时被复用**：请求超时 / 断网 /
-  退出码 50 时它还开着，原样重跑复用同一个 id，服务端去重，不会重复扣费。
-- 服务端已经接下提交之后，同一条命令再跑一次就是一次新的购买——CLI 不会、也不应该
-  拦下它，因为「再生成一版」本来就是合法请求。恢复请用 `job list` / `job wait`。
-- 改了任何实质参数（数量、模板、版式、改图指令文字、`--mark` 的坐标或说明）同样是新的
-  购买——因为那确实是不同的图。
-- 你永远不需要、也不应该自己生成或传 `operation_id`。
+- `generate` / `edit` / `job answer` / `job resume` internally keep an `operation_id` keyed by
+  "work + intent fingerprint". **That id is only reused when the previous submission didn't
+  land**: on a timeout, a dropped connection or exit code 50 it is still open, so re-running
+  the identical command reuses it, the server deduplicates, and nothing is charged twice.
+- Once the server has accepted the submission, running the same command again is a new
+  purchase — the CLI won't block it and shouldn't, because "give me another version" is a
+  legitimate request. For recovery use `job list` / `job wait`.
+- Changing any material parameter (count, template, layout, the edit instruction text, a
+  `--mark` coordinate or note) is likewise a new purchase — because those really are different
+  images.
+- You never need to, and never should, generate or pass an `operation_id` yourself.
 
-## 其他
+## Miscellaneous
 
-- `magic auth status --json` 看当前站点、账号、token 到期时间。
-- 想连非生产站点：`--base-url https://…` 或环境变量 `MAGIC_ART_BASE_URL`。
-  凭据是按站点存的，换站点等于未登录。
-- 升级：`npm i -g @magic-art/cli@latest && magic skill install`
-  （skill 文件随 CLI 发布，保持同版本）。技能正本写在 `~/.agents/skills/magic-art`，
-  再软链到你机器上已安装的每个 agent，所以这一条命令就把所有 agent 一起升级了。
+- `magic auth status --json` shows the current site, account and token expiry.
+- To point at a non-production site: `--base-url https://…` or the `MAGIC_ART_BASE_URL`
+  environment variable. Credentials are stored per site, so switching sites means being
+  logged out.
+- Upgrading: `npm i -g @magic-art/cli@latest && magic skill install` (the skill files ship with
+  the CLI so the two stay on the same version). The canonical copy lives at
+  `~/.agents/skills/magic-art` and is symlinked into every agent installed on the machine, so
+  that one command upgrades all of them at once.
