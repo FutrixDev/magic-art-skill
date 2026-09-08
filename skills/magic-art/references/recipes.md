@@ -211,3 +211,85 @@ accepted the submission, running `generate` again is a new purchase** — the sa
 generate a second time on the website. So recovery goes through `job list` / `job wait` above.
 Changed parameters (count, template, layout) are more obviously a new purchase, because they
 are genuinely different images.
+
+---
+
+## 7. A film: the same character across several shots
+
+User: "Draw a short one — a courier and an old man on a rooftop at dusk, three shots, same faces
+throughout."
+
+This is what `--mode film` exists for. It has no clarify: `magic film plan` is the conversation,
+and identity is carried by cards rather than by repeating a description and hoping.
+
+```bash
+ID=$(magic project create --mode film --text "天台黄昏，快递员与老人")
+
+# 1. Seed → benches (characters and places). Free; --apply writes them onto the board.
+magic film plan "$ID" --seed "黄昏的天台，快递员送最后一单，遇到常年在此喂鸽子的老人" --apply --json
+magic film list "$ID" --json                      # read the bn_… ids back
+
+# 2. Candidate bases for one bench — PAID, 3 images.
+magic film cand "$ID" bn_courier --count 3 --wait --json
+
+# 3. A view card from the chosen base — PAID, one image per view.
+#    --wait streams job events on stdout, so read the id from the submit and wait after it.
+SHEET=$(magic film sheet create "$ID" --from bn_courier --views front,three_quarter,profile --json | jq -r '.sheet.id')
+magic job wait "$ID" --json                       # the per-view renders it just queued
+
+# 4. Anchor it into the account library. Exits 30 first — that is on purpose.
+magic film anchor "$ID" "$SHEET" --json           # → awaiting_human, exit 30: show the user the urls
+magic film anchor "$ID" "$SHEET" --name 快递员 --handle courier --yes --json   # only after they choose
+
+# 5. A shot: cards in roles, cameras, action, look. Free.
+SHOT=$(magic film shot create "$ID" \
+        --title "递出最后一单" \
+        --card "aa_courier:three_quarter:subject@0.35,0.6" \
+        --card "aa_rooftop:establishing:background" \
+        --cam "A:x=0.2,y=0.9,aim=15,lens=35" --cam "B:lens=85" \
+        --action "快递员把包裹递过去，老人抬头" \
+        --look-light "黄昏侧逆光" --ratio 16:9)
+
+# 6. Price it, then render it — 2 cameras × 2 = 4 images.
+magic film generate "$ID" "$SHOT" --count 2 --dry-run --json     # quote + composed prompts
+magic film generate "$ID" "$SHOT" --count 2 --wait --json
+
+# 7. Keep one frame, and download from the url the API returns.
+magic film out "$ID" <assetId> --json             # receipt: which cards, which cam, which prompt
+magic film save "$ID" <assetId>                   # 存为镜 — the frame joins the strip
+magic assets download "$ID" --asset <assetId> --out ./out
+```
+
+Key points:
+
+- **Five commands cost points**: `film cand`, `film sheet create`, `film sheet update` (only when
+  it adds or re-shoots a view), `film generate`, `film swap`. Everything else — `plan`, `list`,
+  `shot *`, `out`, `save`, all of `library` — is free.
+- **Never compute the price.** `film generate --dry-run` returns the server's `quote`; quote that.
+- **Never `anchor --yes` on your own judgment.** The bare `anchor` prints the ready views with
+  their urls and exits 30 precisely so the user picks the face.
+- No `--prompt` exists here. To see what will be rendered, `--dry-run`; to override one camera,
+  `--prompt-edit "A=…"`; to go back to composition, `--auto-prompt`.
+- Second film, same character: skip steps 1–4 entirely.
+
+  ```bash
+  magic library list --kind char --json
+  magic film shot create "$ID2" --card "aa_courier:front:subject" --cam A --action "…"
+  ```
+
+  A card the second film needs a new angle of takes `magic film sheet create "$ID2" --from
+  aa_courier --views back` — the new view is written back into the library card, so the first
+  film gets it too.
+
+### 7b. Fixing one frame without re-casting the shot
+
+User: "This one's good, but use his front view instead of the three-quarter."
+
+```bash
+magic film swap "$ID" <assetId> --view front --ref-card aa_courier --wait --json
+```
+
+That re-renders **this frame only** (one image, one frame's points); the shot keeps pointing at
+the three-quarter for everything after it. To change the shot itself, `magic film shot update
+"$ID" "$SHOT" --card …` — and note that `--card` / `--cam` replace the whole list, so pass every
+reference you want kept.

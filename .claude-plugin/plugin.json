@@ -2,7 +2,7 @@
   "name": "magic-art",
   "displayName": "Magic Art",
   "description": "Turn an idea into finished visuals with Magic Art (magic-design.art) — AI posters, social card decks, portraits and image series — then download them locally. Drives the `magic` CLI.",
-  "version": "0.2.2",
+  "version": "0.4.0",
   "author": {
     "name": "Futrix",
     "url": "https://magic-design.art"

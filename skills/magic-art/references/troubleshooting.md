@@ -192,6 +192,15 @@ Other `--mark-ui` situations:
 - Changing any material parameter (count, template, layout, the edit instruction text, a
   `--mark` coordinate or note) is likewise a new purchase — because those really are different
   images.
+- Exit **50** with `"reason":"retry_with_new_operation_id"` means the server refused the id this
+  submission carried — usually because that operation already ran and was settled. **The CLI does
+  not re-send it**, precisely because re-sending would pay for the same batch twice. Go and look
+  first (`magic logo list <id>`, `magic film sheet list <id>`, or `job list`), and only re-run the
+  command if nothing was produced; the next run gets a fresh id automatically.
+- The same `"reason":"retry_with_new_operation_id"` can also ride on exit **21** (the reserve
+  failed because the balance was too low). Branch on the exit code, not on the reason: 21 stays
+  21 — nothing ran and nothing was charged, so the user tops up and re-runs, and the id is
+  rotated for them either way.
 - You never need to, and never should, generate or pass an `operation_id` yourself.
 
 ## Miscellaneous

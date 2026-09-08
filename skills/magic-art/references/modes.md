@@ -18,6 +18,8 @@ instead of letting the user believe they are getting 30 images**.
 | `free` | Free creation | Candidate images | 1 | 1–20 | Depends |
 | `brand-series` | Brand series | Candidate images | 1 | 1–20 | Yes |
 | `ecommerce-visual` | E-commerce visual | Candidate images | 1 | 1–20 | Yes |
+| `film` | Film Studio (recurring characters and places) | **Frames per camera** | 1 | 1–12 total (`cameras × count`) | No — `magic film plan` replaces clarify |
+| `logo` | Logo 工坊 (brand marks) | **Candidates per direction** | 2 (× 3 directions) | 1–5 per direction, 1–5 directions (or one per `--mark-types` entry — up to six with `auto` alongside all five types) | No — `magic logo generate` carries the brief |
 
 `slide` (decks) and `fashion` (apparel design) are marked coming soon on the site and
 `project create` rejects them. Even once apparel opens up, its multi-delivery batches can only
@@ -38,6 +40,10 @@ explicitly).
 | "A series shoot — flower field / seaside / Tang-dynasty style" | `portrait-series` | Official scene-template albums; multiple scenes can be selected |
 | "Just run with it, give me a few directions" | `free` | Doesn't lock a template; blends the layout vocabulary of the library |
 | "A full set of brand collateral" | `brand-series` | A matched set needing one consistent brand language |
+| "Draw this scene — same character in each shot" | `film` | The same identity has to survive across images, which only cards can guarantee |
+| "A short comic / storyboard / shot list" | `film` | Several shots sharing characters, places and a look |
+| "The same product, five different scenes" | `image-series` or `ecommerce-visual` | A product is a reference photo, not a character card — no benches needed |
+| "I need a logo / brand mark / app icon" | `logo` | A mark is drawn wordless and transparent, then packed — a different deliverable from a poster of a name |
 
 When it isn't clear, don't guess: naming the two candidates with a one-line difference and
 letting the user pick is cheaper than picking wrong and redoing it.
@@ -84,3 +90,63 @@ quote.
   `magic structure get <id> --json`, edit, and write it back with
   `magic structure set <id> --file slots.json`. This is the last editable point **before the
   points are spent**.
+
+## `film` — the one mode that does not use clarify
+
+Film Studio replaces the shared clarify conversation with its own director call, and replaces
+"describe the image" with "reference these cards". Everything else in this file still applies —
+quoting, downloading, exit codes — but the middle of the flow is different enough to be worth
+reading before the first command.
+
+### The chain
+
+| Thing | Id | What it is | Charged |
+|---|---|---|---|
+| seed | — | One sentence describing the scene | No |
+| bench | `bn_…` | A character or place the director proposed; holds candidate bases A/B/C | Candidates: **yes** |
+| view card | `fs_…` | One identity, several views (front / profile / establishing …), rendered from a chosen base | Create + 补拍/重 roll: **yes** |
+| library card | `aa_…` | An anchored view card, at the **account** level: survives this work, reusable in the next one | No |
+| shot | `fsh_…` | Cards in roles + cameras + action + look | No |
+| frame | asset id | One rendered image, carrying a receipt of exactly what made it | `generate` / `swap`: **yes** |
+
+```bash
+magic film plan <id> --seed "<one sentence>" --apply --json   # seed → benches + a first shot
+magic film list <id> --json                                   # benches, cards, shots, running jobs
+magic film cand <id> <bn_…> --count 3 --wait --json           # 1–5 candidate bases
+magic film sheet create <id> --from <bn_…|aa_…> [--views …] --wait --json
+magic film sheet update <id> <fs_…> --add-view profile --wait --json
+magic film anchor <id> <fs_…> --name 老陈 --handle laochen [--yes]
+magic film shot create <id> --card "<id>:<view>[:<role>][@x,y][=name]"... --cam "A:lens=35"...
+magic film generate <id> <fsh_…> --count 2 [--dry-run] [--wait] --json
+magic film out|swap|save <id> <assetId>
+```
+
+### The four things that go wrong
+
+1. **Writing a prompt.** There is no `--prompt` in film, by design: the sentence is composed from
+   the ids. `--dry-run` / `--show-prompt` reads the composed prompt back; `--prompt-edit "A=…"`
+   overrides one camera's prompt entirely, and `--auto-prompt` restores composition.
+2. **Computing a price.** `magic film generate --dry-run --json` prices the exact click and
+   returns the prompts with it. Points come from that response's `quote`, never from arithmetic.
+3. **Anchoring without asking.** `magic film anchor` without `--yes` prints the candidate views
+   with their image URLs and exits **30**. That is a question for the user, not a speed bump.
+4. **Treating a view as an enum.** `--views` and `--add-view` take any label. `front`, `profile`,
+   `establishing`, `俯拍` are all valid; the defaults (character: front / three_quarter / profile / back,
+   scene: establishing / reverse / lateral / detail — four each) are a starting set, not the
+   allowed set.
+
+### Cameras, roles and blocking
+
+- `--cam "A:x=0.3,y=0.85,aim=20,height=low,lens=35"` — tag plus optional geometry; `--cam A` alone
+  takes the server's defaults. `tag=A,lens=35` is the same thing spelled out. Max 3 cameras.
+  On `film generate`, `--cam A` **selects** an existing camera; change one with `film shot update`.
+- `--card "<id>:<view>:<role>@x,y=name"` — role is `subject` / `background` / `style` / `element`
+  (default `subject`); `@x,y` is the blocking position as 0–1 fractions of the frame.
+- `--no-blocking` on a shot ignores the mini-map positions when composing.
+
+### Cost shape
+
+`cameras × --count` images per click, capped at 12; each image is priced like any other image at
+the work's resolution. Film adds no pricing dimension of its own, so
+`magic billing quote --op image -n <cameras × count>` still applies for planning ahead — but the
+number you quote to the user should come from `film generate --dry-run`.

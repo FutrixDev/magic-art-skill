@@ -6,7 +6,7 @@ description: >
   the results locally. Use when the user wants a poster, cover, social card deck, portrait
   or a set of on-theme images, or mentions Magic Art / magic-design.art. Everything runs
   through the `magic` CLI.
-version: 0.2.2
+version: 0.4.0
 metadata:
   openclaw:
     emoji: 🎨
@@ -51,6 +51,8 @@ genuinely theirs.
 | A Xiaohongshu note, multi-page deck, recommendation post | `social-card` |
 | One theme, several images that belong together | `image-series` |
 | A portrait shoot, "turn my photo into…" (needs the user's own photo) | `portrait` / `portrait-series` |
+| A scene, a story, recurring characters across several shots | `film` (see "Film Studio" below) |
+| A logo, brand mark, symbol, app icon | `logo` (see "Logo Studio" below) |
 | Can't articulate it, wants free rein | `free` |
 
 Unsure? Run `magic styles list --kind <mode> --json` to see what styles exist in that mode,
@@ -148,6 +150,125 @@ with the boxes — exactly like annotated editing on the website.
   to `--mark` with coordinates).
 - No submission within 15 minutes times out, handled the same as a cancel.
 
+## Film Studio (`--mode film`)
+
+For work where **the same character or place has to look the same in more than one image** —
+a scene, a short story, a comic, a shot list. The other modes render each image on its own;
+film gives you cards that other shots reference, so consistency is structural instead of
+something you re-describe in every prompt.
+
+```bash
+magic project create --mode film --text "<the user's idea>"          # → a work id
+magic film plan "$ID" --seed "深夜天台，老陈和年轻警察对峙" --apply --json  # seed → benches (free)
+magic film cand "$ID" bn_chen --count 3 --wait --json                # candidate bases (charged)
+magic film sheet create "$ID" --from bn_chen --views front,profile --wait --json  # → fs_… (charged)
+magic film anchor "$ID" fs_chen --name 老陈 --handle laochen          # exit 30 → ask the user
+magic film anchor "$ID" fs_chen --name 老陈 --handle laochen --yes    # → aa_… in the library
+magic film shot create "$ID" --title 天台对峙 \
+      --card "aa_laochen:front:subject@0.3,0.6" --cam "A:lens=35" --action "老陈抬手" --json
+magic film generate "$ID" fsh_1 --count 2 --dry-run --json            # price + composed prompt
+magic film generate "$ID" fsh_1 --count 2 --wait --json               # charged
+magic film out "$ID" <assetId> --show-prompt --json                   # what this frame was made of
+magic film save "$ID" <assetId>                                       # keep it in the strip
+```
+
+`magic film list <id> --json` returns the whole film — benches, view cards, shots and any
+running jobs — and is how you re-orient after an interruption instead of re-planning.
+
+- **Pass ids and structured fields, never prompt prose.** The sentence the image model reads is
+  composed server-side from the card ids, the camera and the action. To see it, read it back
+  with `--dry-run` / `--show-prompt`; to change it, change the structure. `--prompt-edit "A=…"`
+  exists for the rare full override, and `--auto-prompt` puts composition back.
+- **A view is a free label**, not an enum: `--views front,profile,俯拍=俯拍` is fine. Omitting
+  `--views` uses the type's default set.
+- **Only five things cost points**: `film cand`, `film sheet create`, `film sheet update` (when it
+  adds or re-shoots a view), `film generate`, `film swap`. Everything else — planning, listing,
+  editing shots, reordering, saving, the whole library — is free.
+- **Never compute a film price yourself.** `magic film generate --dry-run --json` returns the
+  server's `quote` and the composed prompt in one call; quote from that.
+- One click renders `cameras × --count` images, capped at 12.
+
+### Anchoring is the user's decision
+
+`magic film anchor` promotes a view card into the **account-level library**: it outlives this
+work, and every shot referencing that identity is rebound onto it. Which take *is* the
+character is taste, so without `--yes` the CLI prints the candidate views and their image URLs
+and exits **30**. Show the user the images, get an answer, then re-run with `--yes`.
+
+`magic library list|show|add|set|rm` is that library's own surface — the cards are pointers, so
+deleting a work does not delete its cards, and `magic library rm --hard` on a card another film
+still references is refused rather than quietly breaking that film.
+
+## Logo Studio (`magic logo`)
+
+For a **brand mark**: a logo, a symbol, an app icon. One brief goes in, a board of distinct
+directions comes back as transparent PNGs, and the user picks the one that is theirs.
+
+```bash
+magic logo generate --name "Nimbus" --about "weather app for sailors" \
+      --palette "#0f4c81,#e8b04b" --directions 3 --count 2 --dry-run --json   # price + the plan, free
+magic logo generate --name "Nimbus" --about "weather app for sailors" \
+      --directions 3 --count 2 --out ./logos --yes --json                     # charged; waits; downloads
+magic logo generate --name "Nimbus" --about "weather app for sailors" \
+      --mark-types mascot,emblem --count 2 --out ./logos --yes --json         # exactly these two directions
+magic logo generate --name "Nimbus" --about "weather app for sailors" \
+      --mark-types mascot,auto --count 2 --out ./logos --yes --json           # mascot + one the planner surprises you with
+ls -la ./logos            # d1-c1.png d1-c2.png d2-c1.png … — show the user the FILES, not the ids
+magic logo list <id> --out ./logos --json                                     # the board again, free
+magic logo pack <id> --cand d1-c2 --out ./logos                               # anchor + delivery zip, free
+```
+
+`magic logo generate` creates the work itself when you don't pass `--project <id>` — **including
+with `--dry-run`**, because the planner and the price both live on the work. That dry-run work is
+empty and costs nothing, but it is real: reuse it with `--project <id>` instead of letting the next
+call mint a second one. The id is the first thing on stdout — `project_id\t<id>` (with `--json`, a
+`{"event":"project_created",…}` line) printed **before** anything is charged, so a run that dies
+mid-flight is recoverable with `--project <id>`. `magic logo list <id>` is how you re-orient after
+an interruption instead of generating a second board.
+
+`--mark-types` names **which** kinds of mark to explore, out of `abstract` / `lettermark` /
+`mascot` / `emblem` / `pictorial` (comma-separated, at most five). One type = one direction, in the
+order given, so it sets the direction count and `--directions` is ignored (with a notice) when both
+are passed. A sixth value, `auto`, is "you pick": that ONE slot's type is chosen server-side by the
+planner, which is asked for a surprising angle the brief does not spell out — and it may pick a type
+already named in the same list. At most one `auto`, but it combines with all five concrete types
+(`abstract,lettermark,mascot,emblem,pictorial,auto` = six directions). `--mark-types mascot,auto` is
+therefore two directions — a mascot, plus whatever the planner wants to surprise you with.
+Leave it off and the planner picks the types from the brief, which is the default. It is
+the same choice the 简报 card offers on the canvas, and it rides on the brief — so a board planned
+with it keeps the selection.
+
+The table both commands print is `id / direction / mark type / status / transparent ratio / local
+file`. `status` is `ready` (downloaded), `opaque` (the model returned a background instead of
+transparency — **already refunded**, nothing to pay or fix, offer a re-roll) or `failed`.
+
+- **The brand name never enters the image prompt.** Models cannot spell reliably, so the mark is
+  drawn wordless and the wordmark is built from real font outlines later. Don't try to route the
+  name in through `--about`; describe what the brand *is* instead.
+- **Which mark is the brand is the user's decision, made by looking.** After `generate`, give the
+  user the local file paths so they can open the PNGs. Never pick for them.
+- **How big the batch is**: `--directions` defaults to **3** (1–5) and `--count` to **2** (1–4),
+  so a bare `generate` renders 3 × 2 = 6 marks. The server clamps both, and the canvas's 简报 card
+  stores the same two numbers — passing neither on a work that already has a brief reuses what the
+  user chose there.
+- **Only `generate` costs points** — directions × count images, priced per 2K image; `list` and
+  `pack` are free. Quote from `--dry-run --json`'s `quote`, never by arithmetic. Over 300 points
+  without `--yes`, the CLI prints the quote and exits **30**: relay it, then re-run with
+  `--project <id> --yes` so it uses the work it already created. Exit **30** with
+  `"reason":"no_quote"` means the server priced nothing and the CLI refused to dispatch blind —
+  retry. Not enough points is exit **21** (only the user can fix it); nothing was dispatched in
+  either case.
+- **Exit 50 after a paid `generate` means "still running", not "broken"** — the points were spent
+  and the jobs are alive server-side, so the move is `magic logo list <id> --out ./logos`, never a
+  second `generate`. A candidate that actually failed shows as exit **40**, once nothing is in
+  flight.
+- **`pack` always succeeds, and always tries for the SVG.** The zip holds transparent PNGs in six
+  sizes, two mono versions, the wordmark lockups, a README — and `vector/mark.svg`, which the export
+  job traces on the spot when the mark has none. Tracing needs the deployed logo-lab service, so
+  where it is missing the archive ships without that one file and says so: `--json` carries
+  `"vector": false` and the plain output prints a line. Never tell the user the SVG is in there
+  without checking that field.
+
 ## Who answers (checkpoint policy)
 
 | Cloud checkpoint | Your strategy |
@@ -157,6 +278,8 @@ with the boxes — exactly like annotated editing on the website.
 | Count confirmation (`selecting_count`) | Answer yourself: the number they said, or the mode default if they said none |
 | `awaiting_human` during generation | Answer yourself first; purely subjective preference with nothing in context → ask |
 | Whether a regional box is accurate | **Hand it over when it isn't**: any doubt about position → `--mark-ui` so the user confirms or fixes the box on the image. Don't spend points on guessed coordinates |
+| `magic film anchor` (exit 30) | **Always ask**: the card outlives this work and rebinds every shot that uses it. Relay the candidate views and their image URLs, then re-run with `--yes` |
+| Which bench candidate / which take to build on | **Ask when it is taste, decide when it is craft**: "which of these three faces is 老陈" is the user's; "this one failed, re-roll it" is yours |
 | Insufficient balance / upgrade needed | **Always ask**: quote plus top-up URL, never purchase |
 | Publishing / permanent deletion | **Always ask** (outward-facing, irreversible) |
 | Login | Relay the URL and pairing code only, **never enter any credential** |
@@ -176,6 +299,10 @@ with the boxes — exactly like annotated editing on the website.
   buying it a second time).
 - **Look at the image before giving coordinates**: `--mark` coordinates may only come from an
   image you actually viewed, never inferred from an asset id.
+- **In film, pass ids — never a hand-written prompt.** Prompts are composed server-side from
+  the cards, camera and action; read one back with `--dry-run` / `--show-prompt` instead of
+  writing one, and never total up points yourself when the server returns a `quote`.
+- **Never `magic film anchor --yes` on your own judgment**: exit 30 is a question for the user.
 - **Always get images down with `magic assets download`** (the CLI resolves CDN or signed
   private-bucket URLs). Don't try to pull bytes out of the API.
 - Look up each command's full set of flags with `magic <command> --help` rather than
@@ -183,7 +310,9 @@ with the boxes — exactly like annotated editing on the website.
 
 ## Reference
 
-- `references/modes.md` — what each mode is for, count bounds, input requirements, routing calls
-- `references/recipes.md` — end-to-end recipes (command sequences plus expected output)
+- `references/modes.md` — what each mode is for, count bounds, input requirements, routing calls,
+  and the `film` chain (bench → view card → anchor → shot) with its charged commands
+- `references/recipes.md` — end-to-end recipes (command sequences plus expected output),
+  including a full film and the second film that reuses its cards
 - `references/troubleshooting.md` — exit-code handbook, rate limits, expired tokens,
   `awaiting_human` reply templates, the `job resume` decision tree
