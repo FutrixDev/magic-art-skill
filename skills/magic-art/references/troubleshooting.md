@@ -142,6 +142,21 @@ charge.
   signing configured. That is an environment problem; **do not try to pull the bytes through
   the API instead.** Report it to the user.
 
+## `--ref` rejected (exit code 10)
+
+Two refusals, both deliberate.
+
+- **"无法读取参考图 <path>"** — the file could not be read. Check the path you built (`~` is not
+  expanded inside quotes in every shell; pass an absolute path when in doubt) and that the file
+  exists. If the file reads but the server rejects it (`不是有效的图片`, `参考图上传只成功了 …`),
+  it is not a real image — ask the user for the original rather than converting it silently.
+- **"一张台最多 6 张参考照 …" / "一镜最多 6 个参考位 …" / "一份简报最多 4 张参考图 …"** — the
+  target already holds references and what you passed does not fit. The message says how many
+  slots are left. Nothing was uploaded and nothing was charged: drop some files, or clear the
+  existing ones first (`magic film shot update <id> <fsh_…> --card …` replaces the whole refs
+  list). The CLI never uploads "as many as fit" — a render that used some of the user's photos
+  and said nothing is worse than an error.
+
 ## `--mark` rejected (exit code 10)
 
 Annotation coordinates are **fractions of 0–1**, not pixels. `--mark "1200,800,300,200=change

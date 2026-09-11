@@ -293,3 +293,66 @@ That re-renders **this frame only** (one image, one frame's points); the shot ke
 the three-quarter for everything after it. To change the shot itself, `magic film shot update
 "$ID" "$SHOT" --card …` — and note that `--card` / `--cam` replace the whole list, so pass every
 reference you want kept.
+
+### 7c. The user gave you photos
+
+User: "Here's a picture of the actual rooftop — use it."
+
+```bash
+# On the bench, so every base image rendered from it starts from that place.
+magic film cand "$ID" bn_rooftop --ref ~/photos/rooftop.jpg --count 3 --wait --json
+
+# Or on one shot, as the background reference for these frames only.
+magic film shot create "$ID" --title "递出最后一单" \
+      --card "aa_courier:three_quarter:subject" \
+      --ref ~/photos/rooftop.jpg:background --cam "A:lens=35" --json
+```
+
+The photo is a reference for look and composition, not artwork to reproduce. Role values are the
+same as `--card`'s (`subject` / `background` / `style` / `element`, default `subject`); `film cand`
+takes no role. Cards and photos share six slots per bench and per shot, and going over is an
+error — the CLI never silently uses only some of what the user gave it. The upload happens before
+the render and survives a failed one, so a retry costs one render, not one upload plus one render.
+`magic film list` shows them as `refs=2(image:<assetId>)`.
+
+## 8. A prompt the user wrote, rendered unchanged
+
+User: "Here's my prompt, render it exactly as written — don't improve it."
+
+```bash
+magic billing quote --op image -n 2 --json
+
+# Short prompt: pass it positionally.
+magic image "a cracked ceramic teacup on wet slate, overcast north light, 85mm, shallow depth of field" \
+      -n 2 --ratio 3:2 --resolution 2k --out ./out --json
+
+# Long prompt: keep it in a file so shell quoting cannot mangle it.
+magic image --prompt-file ./prompt.txt -n 1 --out ./out --json
+```
+
+The gateway receives the prompt byte for byte — no template, no style bible, no director pass,
+no aspect-ratio sentence. `--ratio` / `--resolution` / `--quality` / `--background` are structured
+parameters and never appear as words in the prompt.
+
+The `--json` output echoes the `prompt` the server sent, so the user can diff it against what
+they gave you:
+
+```json
+{
+  "work_id": "pr_...",
+  "prompt": "a cracked ceramic teacup on wet slate, ...",
+  "request": { "n": 2, "ratio": "3:2", "resolution": "2k", "size": "1536x1024" },
+  "images": [{ "asset_id": "raw_00_1f3c...", "size": { "width": 1536, "height": 1024 }, "url": "https://..." }],
+  "failures": [],
+  "downloaded": [{ "asset_id": "raw_00_1f3c...", "file": "out/raw_00_1f3c....png" }]
+}
+```
+
+Each image is reserved, billed and retried on its own: if one of the two fails it appears under
+`failures` with its points already refunded, and the other is still delivered. The results live in
+an ordinary work, so `magic assets list <work_id>` and the work page behave as usual.
+
+Do not reach for this when the user described an *idea* — composing a prompt out of a rough idea
+is what `project create` + `generate` does, and sending the raw description instead just makes a
+worse picture.
+

@@ -6,7 +6,7 @@ description: >
   the results locally. Use when the user wants a poster, cover, social card deck, portrait
   or a set of on-theme images, or mentions Magic Art / magic-design.art. Everything runs
   through the `magic` CLI.
-version: 0.4.0
+version: 0.6.0
 metadata:
   openclaw:
     emoji: 🎨
@@ -55,6 +55,10 @@ genuinely theirs.
 | A logo, brand mark, symbol, app icon | `logo` (see "Logo Studio" below) |
 | Can't articulate it, wants free rein | `free` |
 
+**None of the above**: the user has already written the exact prompt they want rendered and
+is asking for it to go to the model *as written* — skip modes entirely and use
+`magic image` ("Raw prompt, straight through" below).
+
 Unsure? Run `magic styles list --kind <mode> --json` to see what styles exist in that mode,
 or `magic search --json` to pull every available facet in one call.
 
@@ -92,6 +96,50 @@ magic assets download <id> --out ./out                                      # re
 5. **Edit**: `magic edit <id> --parent <assetId> --prompt "<what to change>"` (returns the new
    image synchronously), then download. When the change is hard to describe for the whole
    image and only one area is wrong, switch to **regional annotation** (next section).
+
+## Raw prompt, straight through (`magic image`)
+
+Every other path in this skill *composes* a prompt: the mode's template, the chosen style,
+the film cards, the director pass. That is the point of them — the user brings an idea and
+the service turns it into a prompt that renders well.
+
+`magic image` is the opposite, and the only command that does this:
+
+```bash
+magic image "<the exact prompt>" -n 2 --ratio 3:2 --resolution 2k --out ./out --json
+```
+
+The prompt string is sent to the image gateway **byte for byte**. Nothing is prepended,
+appended, rewritten, translated, summarised or safety-wrapped, and no style template,
+style bible, director or aspect-ratio sentence is mixed in. Aspect ratio, resolution,
+quality and transparent background are structured parameters — they never become words
+inside the prompt.
+
+Use it when:
+
+- the user hands you a prompt and says "render this, don't touch it";
+- they are iterating on prompt wording themselves and need the model's honest response to
+  exactly what they wrote;
+- a prompt was authored elsewhere (another tool, a paper, their own library) and must be
+  reproduced unchanged.
+
+Do **not** use it as a shortcut for "the user described something they want": composing a
+good prompt out of a rough idea is what `project create` + `generate` is for, and going raw
+there just makes a worse picture.
+
+Notes:
+
+- `--prompt-file <path>` reads the prompt from a file, verbatim including newlines — use it
+  for anything long enough that shell quoting could mangle it. It is mutually exclusive with
+  the positional prompt.
+- `--json` echoes back the `prompt` the server actually sent to the gateway, so the
+  "unchanged" claim is checkable, not just asserted.
+- `-n 1..4`. Each image is billed and fails on its own: one failure does not lose the others,
+  and the failed one is refunded automatically (it shows up under `failures`).
+- The results land in an ordinary work, so everything downstream is unchanged:
+  `magic assets list|download <work id>`, the work page, the account library. `--out <dir>`
+  downloads them in the same call.
+- `magic billing quote --op image -n <N> --json` first, as with any other spend.
 
 ## Regional (annotated) edits
 
@@ -188,6 +236,34 @@ running jobs — and is how you re-orient after an interruption instead of re-pl
   server's `quote` and the composed prompt in one call; quote from that.
 - One click renders `cameras × --count` images, capped at 12.
 
+### The user handed you photos
+
+When the user gives you image files — a location photo, a costume shot, a mood board page — pass
+them with `--ref`. They are **inspiration and composition reference, not something to copy**: the
+render is a new image informed by them.
+
+```bash
+magic film cand "$ID" bn_roof --ref ~/photos/roof-dusk.jpg --count 3 --wait --json  # 挂在台面上
+magic film shot create "$ID" --title 天台对峙 \
+      --card "aa_laochen:front:subject" \
+      --ref ~/photos/roof-dusk.jpg:background --json                                # 挂在这一镜上
+```
+
+- `--ref <file>[:<role>]` — the role is the same set as `--card` (`subject` / `background` /
+  `style` / `element`), default `subject`. `--ref` on `film cand` takes no role: a bench reference
+  is a look reference for the base image.
+- **`--card` vs `--ref`**: a card is *identity consistency* — the same character, reused across
+  shots and rebound when it is re-anchored. A `--ref` photo is a *one-off reference* attached to
+  this bench or this shot, with no identity behind it. Reach for `--card` when the answer to "is
+  this the same person/place?" must be yes.
+- **Six reference slots**, cards and photos together, per bench and per shot. Over the limit the
+  CLI refuses and says how many fit — it never quietly uses some of the user's photos.
+- Photos are uploaded before the render and **stay attached even if the render fails**, so a retry
+  does not re-upload them. `magic film list` shows them as `refs=2(image:<assetId>)`;
+  `magic film out` prints `image:<assetId>` for a photo the frame actually used.
+- `magic film shot update` replaces the refs list whole. Passing only `--card` drops the shot's
+  photos; pass `--ref` again alongside it to keep them (or omit both to leave refs untouched).
+
 ### Anchoring is the user's decision
 
 `magic film anchor` promotes a view card into the **account-level library**: it outlives this
@@ -241,6 +317,23 @@ with it keeps the selection.
 The table both commands print is `id / direction / mark type / status / transparent ratio / local
 file`. `status` is `ready` (downloaded), `opaque` (the model returned a background instead of
 transparency — **already refunded**, nothing to pay or fix, offer a re-roll) or `failed`.
+
+### The user handed you images
+
+`magic logo generate --ref <file>` attaches up to **4** images to the brief — a sketch, a
+competitor's feel, a photo of the thing the brand is about. They are **reference for direction and
+mood, not artwork to reproduce**, and the output is still a wordless, transparent-background mark.
+
+```bash
+magic logo generate --name "Nimbus" --about "weather app for sailors" \
+      --ref ~/photos/sketch.png --ref ~/photos/mood.jpg \
+      --directions 3 --count 2 --out ./logos --yes --json
+```
+
+Resuming with `--project <id>` appends to what the brief already holds; asking for more than four
+in total is refused rather than truncated. Handing over the same file twice uploads it twice and
+costs a second slot — pass each photo once. `magic logo list <id>`
+prints them as a `refs\t<assetId>,…` line.
 
 - **The brand name never enters the image prompt.** Models cannot spell reliably, so the mark is
   drawn wordless and the wordmark is built from real font outlines later. Don't try to route the
@@ -305,6 +398,9 @@ transparency — **already refunded**, nothing to pay or fix, offer a re-roll) o
 - **Never `magic film anchor --yes` on your own judgment**: exit 30 is a question for the user.
 - **Always get images down with `magic assets download`** (the CLI resolves CDN or signed
   private-bucket URLs). Don't try to pull bytes out of the API.
+- **`magic image` is for a prompt the user authored, not for an idea you would compose**:
+  it sends the string unchanged, so anything that needs shaping belongs in
+  `project create` + `generate`.
 - Look up each command's full set of flags with `magic <command> --help` rather than
   assembling arguments from memory.
 

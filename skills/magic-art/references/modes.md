@@ -117,6 +117,8 @@ magic film sheet create <id> --from <bn_…|aa_…> [--views …] --wait --json
 magic film sheet update <id> <fs_…> --add-view profile --wait --json
 magic film anchor <id> <fs_…> --name 老陈 --handle laochen [--yes]
 magic film shot create <id> --card "<id>:<view>[:<role>][@x,y][=name]"... --cam "A:lens=35"...
+magic film cand <id> <bn_…> --ref photo.jpg ...              # user photos on the bench
+magic film shot create <id> --ref photo.jpg[:<role>] ...     # user photos on this shot
 magic film generate <id> <fsh_…> --count 2 [--dry-run] [--wait] --json
 magic film out|swap|save <id> <assetId>
 ```
@@ -142,6 +144,11 @@ magic film out|swap|save <id> <assetId>
   On `film generate`, `--cam A` **selects** an existing camera; change one with `film shot update`.
 - `--card "<id>:<view>:<role>@x,y=name"` — role is `subject` / `background` / `style` / `element`
   (default `subject`); `@x,y` is the blocking position as 0–1 fractions of the frame.
+- `--ref "<file>[:<role>]"` — a local image the user handed over, uploaded and attached to the
+  bench (`film cand`, no role) or the shot (`film shot create|update`). Inspiration and
+  composition reference, never something to copy. Cards and photos share **six** slots per bench
+  and per shot; over the limit the CLI refuses instead of dropping photos. `film shot update`
+  replaces the whole refs list, photos included.
 - `--no-blocking` on a shot ignores the mini-map positions when composing.
 
 ### Cost shape
