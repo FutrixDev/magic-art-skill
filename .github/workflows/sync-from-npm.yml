@@ -43,7 +43,14 @@ jobs:
           ( cd "$WORK" && npm pack "@magic-art/cli@${VERSION}" --silent >/dev/null )
           # A tarball with no skill/ directory means the packaging broke upstream;
           # fail loudly rather than push an empty mirror.
-          tar -tzf "$WORK"/magic-art-cli-*.tgz | grep -q '^package/skill/SKILL.md$'
+          # Do NOT pipe `tar -tzf` straight into `grep -q`: grep exits as soon as it
+          # matches, and if tar still has entries to write it dies with EPIPE
+          # ("tar: stdout: write error"), which `set -o pipefail` turns into a failed
+          # step. Whether tar loses that race depends on scheduling, so this passed
+          # for years and then failed deterministically on the runner for
+          # @magic-art/cli@0.5.0 (both attempts). List to a file first, then grep it.
+          tar -tzf "$WORK"/magic-art-cli-*.tgz > "$WORK/listing.txt"
+          grep -qx 'package/skill/SKILL.md' "$WORK/listing.txt"
           rm -rf skills/magic-art
           mkdir -p skills/magic-art
           tar -xzf "$WORK"/magic-art-cli-*.tgz -C skills/magic-art --strip-components=2 package/skill
